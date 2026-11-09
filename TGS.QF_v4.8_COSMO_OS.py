@@ -1,0 +1,1264 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+=========================================================================================
+ ПРОГРАММНО-МАТЕМАТИЧЕСКИЙ КОМПЛЕКС «КВАНТОВЫЙ РУБЕЖ v4.8» COSMO_OS.Absolute
+ ОБРАБОТКА СИСТЕМ: 175 | РЕЖИМ: ПОЛНАЯ ДЕДУКЦИЯ
+ 
+ Разработчик: Самохвалов В.В. & Аналитический центр «Брейншторм», 2026 г.
+ Лицензия: GNU General Public License v3 (GNU GPL v3)
+ Кодовый маркер верификации: DOMASHKA_04.11.2026
+ 
+ ВХОД:  папка SPARC на Рабочем столе (содержит файлы *_rotmod.dat)
+        файл Table1.mrt на Рабочем столе (содержит Inc, Dist, R_disk, Q)
+ ВЫХОД: TGS_v4.8_COSMO_OS.Absolute_Report.txt на Рабочем столе
+        папка TGS_v4.8_COSMO_OS.Absolute_Plots на Рабочем столе (175 графиков)
+ 
+ ФИЗИКО-МАТЕМАТИЧЕСКИЙ БАЗИС (ЧТО УЧИТЫВАЕТ ЯДРО COSMO_OS.Absolute ИЗ ПЕРВЫХ ПРИНЦИПОВ):
+   1. Стереометрия баланса фаз 50/50 и чертёж 4 сфер ПТС-сети (Приложения 4.3 и 13.3):
+      Деление единичного шара Вселенной (R0 = 1) пополам между архивным Ядром (R1 = 0.5^(1/3))
+      и активной Кожурой (eta_skin = 1 - R1). Расчёт сквозной пористости через координационное
+      число плотнейшей упаковки Гаусса — Кеплера (2*sqrt(2)), фазы «Идеального Льда» (xi_atom),
+      свободного войда (xi_void), конического раструба Оси Света 60° (деление сферы на конус
+      1/4 и тор 3/4), объёмной доли зоны Mass Gap Серой сферы (W_gap = 5/16 = 0.3125), рубежа
+      Серой сферы (2/R1 ≈ 2.51984) и фактора Пиолы — Кирхгофа сдвига Лэмба (K_PK ≈ 0.33914).
+   2. Микрофизический мост Приложения 4.3:
+      Дедуктивный вывод кванта голого волнового прострела (alpha_raw = xi_space / pi),
+      предела текучести ПТС-полимера на сдвиг (tau_crit = xi_space / 2*pi), порога закрытия
+      пор Коулмена — Вайнберга (mu_0^2) и калибровочного вычета Янга — Миллса (11/3) в ОДУ.
+   3. Топология расслоения Хопфа (K = RP^3 x S^1) и решётка Лича (Lambda_24):
+      Трёхстадийная размотка упругой нити (объёмное ядро 4*pi^3, тор Клиффорда pi^2, петля
+      систолы pi) с кристаллографическим вычетом 24-мерной решётки Лича и 4D-излучения
+      Стефана — Больцмана (pi^4). Живой синтез вакуумного импеданса S_vac, скорости света
+      c_KMS через квант сопротивления Холла R_K = h/e^2 и шага правого винта «Буравчика».
+   4. Физика центральной Чёрной дыры («Валенок» из Невода и резонансная защёлка Керра):
+      Оболочка конечной толщины (delta_val = eta_skin / (3*sqrt(2))) из спрессованных струн
+      с жёсткостью косы Артина (C_braid), собственной торсионной модой (f_t / f_1 = sqrt(C_braid)),
+      краевыми условиями Робина и сбросом веса плотных балджей к резонансной защёлке Керра
+      (a*_res ≈ 0.677815) при квантовом резонансе замка Omega_H / (2*omega_t) = 4/3.
+   5. Трёхуровневый «Золотой коридор» (A -> B -> C_gold) и мост сложности (P != NP):
+      Сшивка минимальной дуги спирали Архимеда при повороте на 1 радиан (A ≈ 1.14779),
+      сферического каркаса Ядра (B = 1/R1 ≈ 1.25992) и горизонта Золотого сечения (C_gold ≈ 1.44135).
+      Аналитический вывод космического люфта пористости (Delta_C = (4/3)*tau_crit*(1 + tau_crit/3)),
+      константы информационного конфайнмента Самохваловой (I_TGS = C_gold - Delta_C ≈ 1.43815)
+      и индекса асимметрии классов сложности P != NP (Index_P/NP ≈ 2.67519).
+   6. Голографический баланс фазы Пара 50/50, обтекание Бернулли и сдвиг Оорта — Артина:
+      Двухкомпонентное барионное давление (звёздное ядро + газовая периферия), голографическая
+      полусумма порогов Зеркала Кожуры и зоны Mass Gap Серой сферы, перенаправление вытесненного
+      ядром потока W_vol*(1 - f_vol) в Кожуру диска и скрутка луча зрения по спирали Архимеда.
+=========================================================================================
+"""
+
+import glob
+import os
+import re
+import sys
+import matplotlib
+import numpy as np
+from scipy.integrate import solve_bvp, solve_ivp
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+try:
+  sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+  pass
+
+# Генерация всех 175 графиков включена по умолчанию (можно отключить ключом --no-plots)
+SAVE_PLOTS = "--no-plots" not in sys.argv
+
+# ======= 1. ДЕДУКТИВНЫЙ ВЫВОД РАБОЧИХ ИНВАРИАНТОВ ИЗ ПЕРВЫХ ПРИНЦИПОВ =======
+
+# 1.1. Первичные аксиомы размерности пространства-времени и баланса фаз 50/50
+DIM_SPACE = 3.0  # Размерность физического 3D-пространства сечения
+DIM_SPACETIME = 4.0  # Размерность 4D-многообразия накрытия S^3 x S^1
+DIM_LEECH = (
+    DIM_SPACE * (2.0**DIM_SPACE)
+)  # 24 = 3 * 2^3 — координационное число решётки Лича Lambda_24
+BALANCE_50_50 = (
+    0.5  # Баланс объёмов фаз Матрёшки: V_core = V_shell = 0.5 * V_total
+)
+R0_UNIVERSE = (
+    1.0  # Единичный радиус внешней Чёрной сферы Кожуры Вселенной
+)
+COORD_GAUSS_KEPLER = 2.0 * np.sqrt(
+    2.0
+)  # Координационный фактор плотнейшей 3D-упаковки сфер Гаусса — Кеплера
+
+# 1.2. Стереометрия 4 базовых сфер ПТС-сети и конуса Оси Света 60° (Приложения 4.3 и 13.3)
+R1_CORE = BALANCE_50_50 ** (
+    1.0 / DIM_SPACE
+)  # Радиус Синей сферы архивного Ядра: 0.5^(1/3) (~0.793700526)
+ETA_SKIN = (
+    R0_UNIVERSE - R1_CORE
+)  # Толщина и вычислительный КПД активной Кожуры (~0.206299474)
+XI_SPACE = (
+    ETA_SKIN**2
+) / COORD_GAUSS_KEPLER  # Истинная сквозная пористость вакуума (~0.015047046)
+XI_ATOM = (
+    2.0 * XI_SPACE
+)  # Пористость фазы «Идеального Льда» / атомный затвор (~0.030094092)
+XI_VOID = ETA_SKIN / np.sqrt(
+    2.0
+)  # Пористость свободного войда на периферии раскрытия (~0.145875754)
+
+ALPHA_RAW = (
+    XI_SPACE / np.pi
+)  # Квант голого волнового прострела Кожуры («Пи-дожим», ~0.004789624)
+TAU_CRIT = ALPHA_RAW / 2.0  # Предел текучести ПТС-полимера на сдвиг: xi_space / (2*pi) (~0.002394812)
+
+X_INTERSECT_NORM = (
+    BALANCE_50_50  # Координата пересечения Синей и Серой сфер в единицах R1: x / R1 = 0.5
+)
+THETA_CONE = np.arccos(
+    X_INTERSECT_NORM
+)  # Угол луча конуса Оси Света к радиальной оси X: arccos(0.5) = pi/3 (60°)
+W_CONE_VOL = 0.5 * (
+    1.0 - np.cos(THETA_CONE)
+)  # Доля объёма конического раструба 60° в сфере: строго 1/4 = 0.25
+W_TORUS_VOL = (
+    1.0 - W_CONE_VOL
+)  # Доля объёма тороидального пояса сферы: строго 3/4 = 0.75
+W_MASS_GAP = (5.0 / 12.0) / (
+    4.0 / 3.0
+)  # Доля зоны конфайнмента (Mass Gap) в объёме Серой сферы: 5/16 = 0.3125
+
+DELTA_X_LAMB = (
+    R1_CORE - X_INTERSECT_NORM
+)  # Линейный люфт проминания Ядра (сдвиг Лэмба): R1 - 0.5 (~0.293700526)
+H_CONE_AXIS = np.sin(
+    THETA_CONE
+)  # Высота конического раструба 60°: sin(60°) = sqrt(3)/2 (~0.866025404)
+K_PK_GATE = (
+    DELTA_X_LAMB / H_CONE_AXIS
+)  # Фактор Пиолы — Кирхгофа переходного слоя Кожуры (~0.339136154)
+RHO_GRAY_END = (
+    2.0 / R1_CORE
+)  # Правый рубеж смещённой Серой сферы в единицах R1: 2^(4/3) (~2.519842100)
+R_LENGTH_HOLO = (
+    R1_CORE / ETA_SKIN
+)  # Голографическое отношение длин путей Ядра и Кожуры (~3.847322102)
+
+# 1.3. Топология расслоения Хопфа (K = RP^3 x S^1), решётка Лича (Lambda_24) и синтез скорости света c
+L_HOPF_VOL = DIM_SPACETIME * (
+    np.pi**3
+)  # Стадия 1: 4D-объём сферического накрытия S^3 x S^1 (~124.0251067)
+L_HOPF_TWIST = (
+    np.pi**2
+)  # Стадия 2: Поверхность скрутки тора Клиффорда Vol(RP^3) (~9.8696044)
+L_HOPF_LOOP = (
+    np.pi
+)  # Стадия 3: Систола замкнутой геодезической петли RP^3 (~3.1415927)
+S_GEO = (
+    L_HOPF_VOL + L_HOPF_TWIST + L_HOPF_LOOP
+)  # Полный геометрический импеданс холодной решётки (~137.0363038)
+
+DELTA_LEECH = 1.0 / (
+    DIM_LEECH * S_GEO
+)  # Кристаллографический вычет упаковки 24-мерной решётки Лича (~0.000304056)
+DELTA_BB = 1.0 / (
+    (np.pi**DIM_SPACETIME) * (S_GEO**2)
+)  # Термодинамический след 4D-излучения Стефана — Больцмана (~5.467e-7)
+S_VAC = (
+    S_GEO - DELTA_LEECH - DELTA_BB
+)  # Вакуумный скаляр импеданса S_vac = alpha^(-1) (~137.03599917)
+
+W_HOPF_VOL = L_HOPF_VOL / S_GEO  # Нормированный вес объёмного ядра Хопфа (~0.905053)
+W_HOPF_TWIST = (
+    L_HOPF_TWIST / S_GEO
+)  # Нормированный вес тороидальной скрутки Клиффорда (~0.072022)
+W_HOPF_LOOP = L_HOPF_LOOP / S_GEO  # Нормированный вес геодезической петли систолы (~0.022925)
+
+# Прямой расчёт скорости света c_KMS через квантовое сопротивление Холла R_K и S_VAC
+H_SI = 6.62607015e-34  # Постоянная Планка (СИ)
+E_SI = 1.602176634e-19  # Элементарный заряд (СИ)
+R_KLITZING = H_SI / (E_SI**2)  # Квант сопротивления Холла R_K = h / e^2 (~25812.807 Ом)
+Z0_VAC = (
+    2.0 * R_KLITZING
+) / S_VAC  # Волновой импеданс вакуума Z_0 = 2 * R_K / S_vac (~376.730313 Ом)
+MU0_GEO = 4.0 * np.pi * 1e-7  # Магнитная проницаемость вакуума
+c_KMS = (
+    Z0_VAC / MU0_GEO
+) / 1000.0  # Дедуктивная скорость света на оболочке сферы Нейтрино (~299792.457968 км/с)
+
+# 1.4. Паспорт центральной Чёрной дыры («Валенок» из Невода, коса Артина и защёлка Керра)
+phi_twist = (
+    DIM_SPACETIME / np.pi
+)  # Оператор квадратуры круга: перевод вращения в скрутку 4/pi (~1.2732395)
+DELTA_VAL = (
+    XI_VOID / DIM_SPACE
+)  # Универсальная толщина «валенка» ЧД: dr / r_s = eta / (3*sqrt(2)) (~0.04862525)
+C_BRAID = (
+    (XI_SPACE / ETA_SKIN) * np.log(1.0 / R1_CORE) * phi_twist
+)  # Объёмная жёсткость 3D-косы Артина на кручение (~0.02145692)
+RATIO_FT_F1 = np.sqrt(
+    C_BRAID
+)  # Отношение частоты торсионной моды «валенка» к основной f_t / f_1 (~0.1464818)
+RES_KERR_RATIO = (
+    DIM_SPACETIME / DIM_SPACE
+)  # Квантовый резонанс замка супервытекания Керра: Omega_H / (2*omega_t) = 4/3
+BETA_LATCH = (
+    2.0 * RES_KERR_RATIO * RATIO_FT_F1
+)  # Безразмерный параметр защёлки (8/3)*sqrt(C_braid) (~0.390618)
+A_KERR_LATCH = (2.0 * BETA_LATCH) / (
+    1.0 + BETA_LATCH**2
+)  # Точный спин резонансной защёлки Керра a*_res (~0.677815)
+
+# 1.5. Трёхуровневый «Золотой коридор» (A -> B -> C_gold) и мост вычислительной сложности P != NP
+PHI_GOLD = 0.5 * (
+    1.0 + np.sqrt(5.0)
+)  # Константа Золотого сечения (~1.61803399)
+ARC_A = 0.5 * (
+    np.sqrt(2.0) + np.log(1.0 + np.sqrt(2.0))
+)  # Веха А: Дуга спирали Архимеда при повороте на 1 радиан (~1.14779357)
+ARC_B = 1.0 / R1_CORE  # Веха B: Жёсткий сферический каркас Ядра 50/50: 2^(1/3) (~1.25992105)
+ARC_C_GOLD = ARC_B + PHI_GOLD * (
+    ARC_B - ARC_A
+)  # Веха C_gold: Идеальный горизонт Золотого сечения (~1.44134712)
+
+# Аналитический вывод космического люфта пористости за пределом текучести полимера tau_crit
+DELTA_GOLD = (
+    RES_KERR_RATIO * TAU_CRIT * (1.0 + TAU_CRIT / DIM_SPACE)
+)  # Налог на зернистость и пористость: (4/3)*tau_crit*(1 + tau_crit/3) (~0.00319563)
+I_TGS = (
+    ARC_C_GOLD - DELTA_GOLD
+)  # Дедуктивный предел информационного конфайнмента Самохваловой (~1.43815148)
+INDEX_P_NP = (
+    R_LENGTH_HOLO / I_TGS
+)  # Индекс алгоритмической асимметрии классов сложности P != NP (~2.675185)
+CORRIDOR_W = (
+    ARC_C_GOLD - ARC_A
+)  # Полная ширина коридора проявленной реальности (~0.29355354)
+GOLD_TENSION = (
+    DELTA_GOLD / CORRIDOR_W
+)  # Относительная пружина золотого дожима на периферии (~0.01088602)
+
+# 1.6. Канонические параметры границ скорости (коридор Кеплера — Гука)
+ALPHA_KEPLER = -BALANCE_50_50  # Нижний предел наклона скорости: кеплеровский спад точечной массы (-0.5)
+ALPHA_HOOKE = R0_UNIVERSE  # Верхний предел наклона скорости: твердотельное вращение Гука (+1.0)
+ALPHA_MID = 0.5 * (
+    ALPHA_HOOKE + ALPHA_KEPLER
+)  # Центр физического коридора градиента: +0.25 (= W_CONE_VOL)
+ALPHA_HALF_SPAN = 0.5 * (
+    ALPHA_HOOKE - ALPHA_KEPLER
+)  # Полуширина физического коридора градиента: 0.75 (= W_TORUS_VOL)
+
+# 1.7. Дедуктивные параметры Лагранжиана 12.2 и космологических масштабов (Приложение 4.3 и 12.2)
+G_KPC = 4.302e-6  # Гравитационная постоянная, кпк * (км/с)^2 / M_sun
+KPC_M = 3.085677581e19  # Метров в 1 килопарсеке
+H0_KMS_MPC = 67.4  # Постоянная Хаббла современной эпохи (Planck 2018), км/с/Мпк
+H0_SI = H0_KMS_MPC * 1000.0 / (KPC_M * 1000.0)  # Параметр Хаббла в с^-1
+a_sh0 = (c_KMS * 1000.0 * H0_SI) / (
+    2.0 * np.pi
+)  # Фоновое ускорение шелеста вакуума: c * H0 / (2*pi) (~1.0422e-10 м/с^2)
+R_HUBBLE_MPC = (
+    c_KMS / H0_KMS_MPC
+)  # Эффективный радиус Хаббла Вселенной-Матрёшки (~4447.96 Мпк)
+
+g_top = 1.0 / (
+    (DIM_SPACETIME * np.pi) ** 2
+)  # Однопетлевой топологический форм-фактор: 1 / (16 * pi^2)
+lambda_0 = g_top / (
+    2.0 * np.pi
+)  # Двухпетлевая константа потенциала Коулмена — Вайнберга: 1 / (32 * pi^3)
+CW_BETA_SUB = (
+    11.0 / DIM_SPACE
+)  # Канонический калибровочный вычет Янга — Миллса в потенциале КВ: 11/3 (~3.66667)
+CW_JAC_SUB = (
+    DIM_SPACE * CW_BETA_SUB - 1.0
+)  # Константа производной потенциала КВ в Якобиане: 3*(11/3) - 1 = 10.0
+
+mu_0_sq = ALPHA_RAW * (
+    1.0 + 2.0 * XI_ATOM
+)  # Критический масштаб закрытия пор mu_0^2 = rho_crit из Приложения 4.3 (~0.005078)
+kappa_white = (
+    R0_UNIVERSE + ETA_SKIN
+)  # Коэффициент вихревой дисперсии Уайта в активной Кожуре: 1 + eta_skin (~1.2063)
+g_str = I_TGS  # Константа спин-полевой связи барионного тока
+GAMMA_SCR = phi_twist / (
+    10.0 * (S_VAC**2)
+)  # Релятивистский параметр правого винта «Буравчика» (~6.7802e-6)
+
+A0_CODE = (
+    a_sh0 * KPC_M
+) / 1.0e6  # Критическое ускорение шелеста в астрофизических единицах (км/с)^2/кпк (~3215.89)
+A_SH_BASE = (
+    np.sqrt(A0_CODE) * R1_CORE
+)  # Базовая скорость сдвигового шелеста на единичном масштабе Ядра R1 (~45.01 км/с)
+SIGMA_CRIT = A0_CODE / (
+    2.0 * np.pi * G_KPC
+)  # Критическая поверхностная плотность Струнного Невода
+SC_SETA = 1.0 / ETA_SKIN  # Масштабный шаг эпицикла Птолемея s_c = 1 / eta_skin (~4.847322)
+
+ETA_KPD = (
+    ETA_SKIN * R1_CORE * (1.0 - XI_ATOM)
+)  # Дедуктивный КПД квадрупольного затвора из Приложения 4.3 (~0.158812)
+MIRROR = (
+    ETA_SKIN / R1_CORE
+)  # Инвариант радиального люфта и отражения Кожура/Ядро (~0.259921)
+W_DISK = (R1_CORE**2) * (
+    1.0 - np.pi * XI_SPACE
+)  # Вес звёздного диска: проекция на площадь Ядра R1^2 с вычетом Пи-дожима пор (~0.600181)
+W_BUL_MAX = (
+    R0_UNIVERSE - DELTA_VAL
+)  # Предельный вес балджа за вычетом толщины «валенка» ЧД (~0.951375)
+W_GAS_MAX = I_TGS  # Максимальный барионный вес газа на пределе конфайнмента дуги Самохваловой
+K_RD_SCALE = (
+    2.0 * ARC_A - XI_VOID
+)  # Дедуктивный делитель масштаба барионного тока: 2*A_Arch - xi_void (~2.149711)
+
+L_DOMAIN_MPC = (
+    R_HUBBLE_MPC * XI_SPACE
+) / ARC_A  # Физический макро-период ячейки стоячей волны Невода (~58.3107 Мпк)
+R_INF_BASE = (
+    R_HUBBLE_MPC * 1000.0 * (XI_SPACE**2) / (1.0 + TAU_CRIT)
+)  # Базовый горизонт конфайнмента сферы «Умного Нейтрино» (~100.47 кпк)
+
+
+def fermi_phase(val, crit, width=XI_ATOM):
+  """
+    Гладкое термодинамическое распределение Ферми — Дирака без ветвлений if/else.
+    Естественная ширина фазового затвора по умолчанию равна пористости «Идеального Льда» XI_ATOM (~0.030094).
+    """
+  z = (val - crit) / max(width, 1e-6)
+  return 0.5 * (1.0 - np.tanh(0.5 * z))
+
+
+# =================== 2. КРАЕВАЯ СИСТЕМА ОДУ С «ВАЛЕНКОМ» ЧД ===================
+def tgs_field_ode_absolute(r, Y, v_bar_sq_array, R_data, Rd):
+  B, dB, chi, dchi = Y[0], Y[1], Y[2], Y[3]
+  r_max_data = float(R_data[-1])
+  v_edge = float(v_bar_sq_array[-1])
+
+  v_bar_sq_safe = np.where(
+      r <= r_max_data,
+      np.interp(r, R_data, v_bar_sq_array, left=float(v_bar_sq_array[0])),
+      v_edge * np.exp(-(r - r_max_data) / Rd),
+  )
+  v_bar_sq_safe = np.maximum(v_bar_sq_safe, 1e-6)
+
+  # Регуляризация радиуса спинового тока на физическом размере «валенка» ЧД
+  r_valenok = np.sqrt(r**2 + (DELTA_VAL * Rd * XI_SPACE) ** 2)
+  J_spin = v_bar_sq_safe / (r_valenok * c_KMS)
+
+  omega_eff = 1.0 / (1.0 + (r / Rd) ** 2)
+  # Оператор фазы Кожуры строго по инвариантам Серой сферы (RHO_GRAY_END = 2/R1) и конуса 60° (K_PK_GATE)
+  Theta = 0.5 * (1.0 + np.tanh(0.5 * (r - RHO_GRAY_END * Rd) / (K_PK_GATE * Rd)))
+  hopf_kernel = (
+      W_HOPF_VOL + W_HOPF_TWIST * Theta + W_HOPF_LOOP * (1.0 - omega_eff)
+  )
+
+  chi_sq_safe = chi**2 + 1e-12
+  cw_log = np.log(chi_sq_safe / mu_0_sq) - CW_BETA_SUB
+
+  dy0 = dB
+  dy1 = (
+      -2.0 / r * dB
+      + (ETA_SKIN * (g_top**2) * (chi**2) + kappa_white * omega_eff * Theta) * B
+      + g_str * hopf_kernel * J_spin
+  )
+  dy2 = dchi
+  dy3 = (
+      -2.0 / r * dchi
+      + ETA_SKIN * (g_top**2) * chi * (B**2)
+      + lambda_0 * (chi**3) * cw_log
+  )
+
+  return np.vstack((dy0, dy1, dy2, dy3))
+
+
+def tgs_field_jacobian_absolute(r, Y, v_bar_sq_array, R_data, Rd):
+  N = len(r) if isinstance(r, np.ndarray) else 1
+  B, chi = Y[0], Y[2]
+  omega_eff = 1.0 / (1.0 + (r / Rd) ** 2)
+  Theta = 0.5 * (1.0 + np.tanh(0.5 * (r - RHO_GRAY_END * Rd) / (K_PK_GATE * Rd)))
+  chi_sq_safe = chi**2 + 1e-12
+
+  Jac = np.zeros((4, 4, N), dtype=float)
+  Jac[0, 1, :] = 1.0
+  Jac[1, 0, :] = (
+      ETA_SKIN * (g_top**2) * (chi**2) + kappa_white * omega_eff * Theta
+  )
+  Jac[1, 1, :] = -2.0 / r
+  Jac[1, 2, :] = 2.0 * ETA_SKIN * (g_top**2) * B * chi
+  Jac[2, 3, :] = 1.0
+  Jac[3, 0, :] = 2.0 * ETA_SKIN * (g_top**2) * chi * B
+  Jac[3, 2, :] = ETA_SKIN * (g_top**2) * (B**2) + lambda_0 * (chi**2) * (
+      DIM_SPACE * np.log(chi_sq_safe / mu_0_sq) - CW_JAC_SUB
+  )
+  Jac[3, 3, :] = -2.0 / r
+  return Jac
+
+
+def tgs_boundary_conditions_absolute(ya, yb):
+  """
+    Левый край (r -> 0): Смешанные краевые условия Робина на упругом «валенке» ЧД (C_braid, delta_val).
+    Правый край (r -> R_outer): Выход в фазу свободного войда (XI_VOID) и фоновый затвор (XI_ATOM).
+    """
+  return np.array([
+      ya[1] - C_BRAID * (ya[0] - XI_ATOM),
+      ya[3] - DELTA_VAL * (ya[2] - R1_CORE),
+      yb[0] - XI_VOID,
+      yb[2] - XI_ATOM,
+  ])
+
+
+def execute_shooting_absolute(v_bar_sq_array, R_data, Rd, R_target, r_outer):
+  r_mesh = np.linspace(1e-4, r_outer, 250)
+
+  def ivp_rhs(r, y):
+    return tgs_field_ode_absolute(
+        np.array([r]), y.reshape((4, 1)), v_bar_sq_array, R_data, Rd
+    ).flatten()
+
+  best_residual = float("inf")
+  best_sol = None
+  for b_center in np.linspace(XI_ATOM, 3.0 * XI_VOID, 5):
+    for chi_center in np.linspace(ETA_SKIN, I_TGS, 5):
+      db_init = C_BRAID * (b_center - XI_ATOM)
+      dchi_init = DELTA_VAL * (chi_center - R1_CORE)
+      y_init = [b_center, db_init, chi_center, dchi_init]
+      sol_ivp = solve_ivp(
+          ivp_rhs,
+          (1e-4, r_outer),
+          y_init,
+          t_eval=r_mesh,
+          method="Radau",
+          rtol=1e-5,
+      )
+      if sol_ivp.success:
+        res_end = np.abs(sol_ivp.y[0, -1] - XI_VOID) + np.abs(
+            sol_ivp.y[2, -1] - XI_ATOM
+        )
+        if res_end < best_residual:
+          best_residual = res_end
+          best_sol = sol_ivp
+
+  if best_sol is not None:
+    B_ret = np.interp(R_target, best_sol.t, best_sol.y[0])
+    chi_ret = np.interp(R_target, best_sol.t, best_sol.y[2])
+    dchi_ret = np.interp(R_target, best_sol.t, best_sol.y[3])
+    return B_ret, chi_ret, dchi_ret, True
+
+  return (
+      np.ones_like(R_target) * XI_VOID,
+      np.ones_like(R_target) * R1_CORE,
+      np.zeros_like(R_target),
+      False,
+  )
+
+
+# ===================== 3. ВСПОМОГАТЕЛЬНЫЕ МОДУЛИ ВВОДА-ВЫВОДА =====================
+def get_desktop_path():
+  home = os.path.expanduser("~")
+  for d in [
+      "Desktop",
+      "Рабочий стол",
+      "OneDrive/Desktop",
+      "OneDrive/Рабочий стол",
+  ]:
+    p = os.path.join(home, d)
+    if os.path.isdir(p):
+      return p
+  return os.getcwd()
+
+
+def find_sparc_folder():
+  desktop = get_desktop_path()
+  paths = [
+      os.path.join(desktop, "SPARC"),
+      os.path.join(os.getcwd(), "SPARC"),
+      desktop,
+      os.getcwd(),
+  ]
+  for p in paths:
+    if os.path.isdir(p) and glob.glob(os.path.join(p, "*_rotmod.dat")):
+      return p
+  return None
+
+
+def normalize_name(raw):
+  name = raw.strip().upper().replace("-", "").replace("_", "").replace(" ", "")
+  return re.sub(r"0+(\d)", r"\1", name)
+
+
+def load_metadata():
+  meta = {}
+  desktop = get_desktop_path()
+  paths = [
+      os.path.join(desktop, "Table1.mrt"),
+      os.path.join(desktop, "table1.mrt"),
+      os.path.join(os.getcwd(), "Table1.mrt"),
+  ]
+  for p in paths:
+    if os.path.isfile(p):
+      try:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+          for line in f:
+            toks = line.strip().split()
+            if len(toks) >= 19 and toks[-2] in ("1", "2", "3"):
+              try:
+                raw_name = toks[0].upper()
+                dist = float(toks[2])
+                inc = float(toks[5])
+                rdisk_phot = float(toks[11]) if len(toks) > 11 else 0.0
+                q = int(toks[-2])
+                meta[raw_name] = (q, inc, dist, rdisk_phot)
+                meta[normalize_name(raw_name)] = (q, inc, dist, rdisk_phot)
+              except (ValueError, IndexError):
+                continue
+        break
+      except OSError:
+        continue
+  return meta
+
+
+def parse_sparc_file(filepath):
+  rows = []
+  with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+    for line in f:
+      clean = line.strip()
+      if (
+          not clean
+          or clean.startswith("#")
+          or clean.startswith("!")
+          or "TAS" in clean
+      ):
+        continue
+      parts = clean.split()
+      if len(parts) < 6:
+        continue
+      try:
+        vals = [
+            float(x) if x.upper() not in ("NAN", "NONE", "INDEF") else 0.0
+            for x in parts[:6]
+        ]
+        if vals[0] > 0.0 and vals[1] > 0.0:
+          rows.append(vals)
+      except ValueError:
+        continue
+  if len(rows) < 3:
+    return None
+  arr = np.array(rows, dtype=float)
+  return {
+      "R": arr[:, 0],
+      "Vobs": arr[:, 1],
+      "Vgas": arr[:, 3],
+      "Vdisk": arr[:, 4],
+      "Vbul": arr[:, 5],
+  }
+
+
+# ==================== 4. МОНОЛИТНОЕ ЯДРО COSMO_OS.Absolute (ПОЛНАЯ ДЕДУКЦИЯ) ====================
+def compute_galaxy_absolute(data, inc_angle_obs, dist_mpc, rdisk_phot=0.0):
+  R, Vobs, Vgas, Vdisk, Vbul = (
+      data["R"],
+      data["Vobs"],
+      data["Vgas"],
+      data["Vdisk"],
+      data["Vbul"],
+  )
+  mask = Vobs > 1.0
+  if np.sum(mask) < 3:
+    return None
+
+  R_m, V_o = R[mask], Vobs[mask]
+  R_max = float(R[-1])
+  R_safe_all = np.sqrt(R**2 + 1e-8)
+
+  # 1. Базовая сборка барионного каркаса и диагностика сдвига слоёв Оорта — Артина
+  v_bar_init_sq = (
+      W_DISK * Vdisk**2 + W_BUL_MAX * Vbul**2 + W_GAS_MAX * Vgas**2 + 1e-6
+  )
+  v_bar_init_m = np.sqrt(v_bar_init_sq[mask])
+
+  # Гладкая проекция логарифмического градиента в канонический коридор Кеплера (-0.5) и Гука (+1.0)
+  if len(R_m) >= 4:
+    log_r = np.log(np.sqrt(R_m**2 + 1e-8))
+    log_v = np.log(np.sqrt(v_bar_init_m**2 + 1e-6))
+    raw_grad = np.gradient(log_v, log_r)
+    dlnv_dlnr = ALPHA_MID + ALPHA_HALF_SPAN * np.tanh(
+        (raw_grad - ALPHA_MID) / ALPHA_HALF_SPAN
+    )
+  else:
+    dlnv_dlnr = np.zeros_like(R_m)
+
+  half_idx = max(len(dlnv_dlnr) // 2, 1)
+  alpha_outer = float(np.mean(dlnv_dlnr[half_idx:]))
+  mean_solid_slope = float(np.mean(dlnv_dlnr))
+
+  # 2. Дедуктивная релаксация балджа и газа и однократный расчёт масштаба тока Rd_kpc
+  v_N2_base = Vgas**2 + Vdisk**2 + Vbul**2 + 1e-12
+  f_gas_r = (Vgas**2) / v_N2_base
+  frac_gas = float(np.mean(f_gas_r))
+
+  v_outer_est_sq = float(np.mean(v_bar_init_sq[-min(3, len(v_bar_init_sq)) :]))
+  M_total_est = (
+      max(float(v_bar_init_sq[-1]), BALANCE_50_50 * v_outer_est_sq)
+      * R_max
+      / G_KPC
+  )
+  r_uroboros_est = np.sqrt(G_KPC * M_total_est / A0_CODE)
+
+  g_bul_init = (Vbul**2) / R_safe_all
+  w_bul_init = A_KERR_LATCH + (W_BUL_MAX - A_KERR_LATCH) * np.exp(
+      -g_bul_init / (2.0 * A0_CODE)
+  )
+  w_gas_init = ARC_A + (I_TGS - ARC_A) * np.exp(-R_safe_all / R_INF_BASE)
+  v_bar_pre_sq = (
+      W_DISK * Vdisk**2 + w_bul_init * Vbul**2 + w_gas_init * Vgas**2 + 1e-6
+  )
+
+  sum_v2_pre = max(float(np.sum(v_bar_pre_sq)), 1e-6)
+  rd_baryon_pre = float(np.sum(R * v_bar_pre_sq)) / (sum_v2_pre * K_RD_SCALE)
+  if rdisk_phot > 0.1:
+    Rd_kpc = max(
+        rd_baryon_pre, (1.0 - frac_gas) * rdisk_phot + frac_gas * rd_baryon_pre
+    )
+  else:
+    Rd_kpc = rd_baryon_pre
+  Rd_kpc = np.sqrt(Rd_kpc**2 + (BALANCE_50_50**2))
+
+  r_inf_dynamic = R_INF_BASE * (
+      R1_CORE + ETA_SKIN * np.tanh(r_uroboros_est / (2.0 * SC_SETA * Rd_kpc))
+  )
+
+  M_total_pre = float(v_bar_pre_sq[-1]) * R_max / G_KPC
+  Sigma_g_pre = M_total_pre / (np.pi * (Rd_kpc**2))
+  s_ratio_pre = Sigma_g_pre / SIGMA_CRIT
+  s_outer_pre = (
+      M_total_pre / (np.pi * (max(R_max, BALANCE_50_50) ** 2))
+  ) / SIGMA_CRIT
+  s_geom_pre = np.sqrt(s_ratio_pre * s_outer_pre)
+  v_bar_max_pre = float(np.max(np.sqrt(v_bar_pre_sq[mask])))
+
+  # Двухкомпонентное барионное давление: звёзды на масштабе Rd + газ на геометрическом масштабе диска
+  s_baryon_eff = (1.0 - frac_gas) * s_ratio_pre + frac_gas * s_geom_pre
+
+  # 3. ГОЛОГРАФИЧЕСКИЙ БАЛАНС ФАЗЫ «ПАР <-> КРИСТАЛЛ» 50/50 (ЗЕРКАЛО КОЖУРЫ + MASS GAP СЕРОЙ СФЕРЫ)
+  # Канал 1: Пористая кавитация компактных и газовых дисков
+  gate_s_low = fermi_phase(s_baryon_eff, ARC_A * R1_CORE, width=XI_ATOM)
+  gate_rd_low = fermi_phase(Rd_kpc, 2.0 * ARC_A, width=2.0 * XI_ATOM)
+  gate_gas_mod = 1.0 - (
+      1.0 - fermi_phase(frac_gas, BALANCE_50_50, width=XI_ATOM)
+  ) * (1.0 - fermi_phase(s_baryon_eff, W_DISK, width=XI_ATOM))
+  phi_compact = gate_s_low * gate_rd_low * gate_gas_mod
+
+  # Канал 2: Голографическая полусумма (50/50) порогов Зеркала Кожуры (MIRROR) и зоны Mass Gap (W_MASS_GAP)
+  crit_solid_s = BALANCE_50_50 * (
+      MIRROR * (1.0 + 0.5 * XI_VOID) + W_MASS_GAP * (1.0 + XI_ATOM)
+  )
+  crit_solid_slope = BALANCE_50_50 * (
+      2.0 * ETA_SKIN * (1.0 + 0.5 * XI_VOID) + W_MASS_GAP * (1.0 + ETA_SKIN)
+  )
+  crit_vmax_vapor = A_SH_BASE * ARC_B * (1.0 + 2.0 * XI_ATOM)
+
+  gate_s_out = fermi_phase(s_outer_pre, crit_solid_s, width=XI_ATOM)
+  gate_slope = 1.0 - fermi_phase(
+      mean_solid_slope, crit_solid_slope, width=XI_ATOM
+  )
+  gate_alpha_o = 1.0 - fermi_phase(alpha_outer, MIRROR, width=XI_ATOM)
+  gate_fgas_2 = fermi_phase(frac_gas, W_DISK, width=XI_ATOM)
+  gate_vmax = fermi_phase(v_bar_max_pre, crit_vmax_vapor, width=RHO_GRAY_END)
+  phi_solid = gate_s_out * gate_slope * gate_alpha_o * gate_fgas_2 * gate_vmax
+
+  # Непрерывная вероятность пребывания ячейки в турбулентной фазе «Пара» Phi_vapor in [0, 1]
+  Phi_vapor = 1.0 - (1.0 - phi_compact) * (1.0 - phi_solid)
+  Phi_crystal = 1.0 - Phi_vapor
+
+  # 4. СПИРАЛЬНАЯ ОПТИКА АРХИМЕДА (1.148 -> 1.438) БЕЗ ИСКУССТВЕННОГО ЗАВЫШЕНИЯ УГЛА НАКЛОНА
+  inc_obs_rad = np.radians(inc_angle_obs)
+  delta_phi_cosmo_rad = (dist_mpc / R_HUBBLE_MPC) * ETA_SKIN
+  n_domains = dist_mpc / L_DOMAIN_MPC
+  local_lens_factor = Phi_vapor / (1.0 + s_outer_pre)
+  delta_phi_spiral_rad = (
+      ETA_SKIN
+      * CORRIDOR_W
+      * (n_domains + local_lens_factor)
+      * Phi_vapor
+      * np.cos(inc_obs_rad)
+  )
+  delta_phi_total_deg = np.degrees(delta_phi_cosmo_rad + delta_phi_spiral_rad)
+
+  # Гладкая гиперболическая защита нижнего порога угла без квадратурного смещения вверх при delta_phi -> 0
+  min_inc_valenok_deg = np.degrees(2.0 * DELTA_VAL)
+  inc_shifted = inc_angle_obs - delta_phi_total_deg
+  inc_true_deg = 0.5 * (
+      inc_shifted
+      + min_inc_valenok_deg
+      + np.sqrt(
+          (inc_shifted - min_inc_valenok_deg) ** 2
+          + (XI_ATOM * min_inc_valenok_deg) ** 2
+      )
+  )
+  inc_rad_true = np.radians(inc_true_deg)
+
+  # Фаза стоячей волны космологического домена Невода
+  theta_cbd_rad = n_domains + delta_phi_cosmo_rad
+  cos_theta_cbd = np.abs(np.cos(theta_cbd_rad))
+
+  sin_i_obs = np.sqrt(np.sin(inc_obs_rad) ** 2 + (DELTA_VAL**2))
+  sin_i_true = np.sqrt(np.sin(inc_rad_true) ** 2 + (DELTA_VAL**2))
+  inc_ratio = sin_i_obs / sin_i_true
+
+  Vgas_true = Vgas * inc_ratio
+  Vdisk_true = Vdisk * inc_ratio
+  Vbul_true = Vbul * inc_ratio
+
+  # 5. Сборка барионного регистра с защёлкой Керра ЧД и релаксацией дуги газа
+  g_bul_code = (Vbul_true**2) / R_safe_all
+  w_bul_profile = A_KERR_LATCH + (W_BUL_MAX - A_KERR_LATCH) * np.exp(
+      -g_bul_code / (2.0 * A0_CODE)
+  )
+  w_gas_profile = ARC_A + (I_TGS - ARC_A) * np.exp(-R_safe_all / r_inf_dynamic)
+  w_gas_m = w_gas_profile[mask]
+  f_gas_m = f_gas_r[mask]
+
+  v_bar_sq = (
+      W_DISK * Vdisk_true**2
+      + w_bul_profile * Vbul_true**2
+      + w_gas_profile * Vgas_true**2
+      + 1e-6
+  )
+  v_bar_sq_m = v_bar_sq[mask]
+  v_bar_m = np.sqrt(v_bar_sq_m)
+
+  M_total = float(v_bar_sq[-1]) * R_max / G_KPC
+
+  # 6. Решение краевой задачи ОДУ 2-го порядка для полей B(r) и chi(r)
+  r_outer = max(2.0 * SC_SETA * Rd_kpc, R_max * ARC_B)
+  r_mesh = np.linspace(1e-4, r_outer, 250)
+  Y_guess = np.zeros((4, len(r_mesh)))
+  Y_guess[0, :], Y_guess[2, :] = XI_VOID, R1_CORE
+
+  B_dynamic = np.ones_like(R_m) * XI_VOID
+  chi_dynamic = np.ones_like(R_m) * R1_CORE
+  dchi_dynamic = np.zeros_like(R_m)
+
+  try:
+    sol = solve_bvp(
+        lambda r, Y: tgs_field_ode_absolute(r, Y, v_bar_sq, R, Rd_kpc),
+        tgs_boundary_conditions_absolute,
+        r_mesh,
+        Y_guess,
+        fun_jac=lambda r, Y: tgs_field_jacobian_absolute(
+            r, Y, v_bar_sq, R, Rd_kpc
+        ),
+        tol=1e-3,
+        max_nodes=500,
+    )
+    if (
+        sol.success
+        and hasattr(sol, "x")
+        and hasattr(sol, "y")
+        and len(sol.y) >= 4
+    ):
+      B_dynamic = np.interp(R_m, sol.x, sol.y[0])
+      chi_dynamic = np.interp(R_m, sol.x, sol.y[2])
+      dchi_dynamic = np.interp(R_m, sol.x, sol.y[3])
+    else:
+      B_dynamic, chi_dynamic, dchi_dynamic, _ = execute_shooting_absolute(
+          v_bar_sq, R, Rd_kpc, R_m, r_outer
+      )
+  except Exception:
+    B_dynamic, chi_dynamic, dchi_dynamic, _ = execute_shooting_absolute(
+        v_bar_sq, R, Rd_kpc, R_m, r_outer
+    )
+
+  Sigma_g = M_total / (np.pi * (Rd_kpc**2))
+  s_ratio = Sigma_g / SIGMA_CRIT
+  s_outer = (M_total / (np.pi * (max(R_max, BALANCE_50_50) ** 2))) / SIGMA_CRIT
+
+  R_safe_profile = np.sqrt(R_m**2 + 1e-8)
+  rho_local = M_total / ((4.0 / 3.0) * np.pi * (R_safe_profile**3)) / 1e9
+  x_phase_local = rho_local / mu_0_sq + 1e-12
+
+  # Гладкий проекционный затвор наклона диска (регуляризован толщиной активной Кожуры ETA_SKIN)
+  aniso_gate = phi_twist * np.sqrt(
+      (np.cos(inc_rad_true) ** 2 + ETA_SKIN**2) / (1.0 + ETA_SKIN**2)
+  )
+
+  # Аксиальный проекционный фактор для галактик, наклонённых острее конуса Оси Света 60° (cos i > 0.5)
+  cone_face_on_boost = max(np.cos(inc_rad_true) - np.cos(THETA_CONE), 0.0)
+
+  v_bar_peak_sq = float(np.max(v_bar_sq_m))
+  g_core_bh = (v_bar_peak_sq * (1000.0**2)) / (Rd_kpc * KPC_M) * C_BRAID
+
+  v_pred_tgs = np.zeros_like(R_m)
+
+  for i, r_val in enumerate(R_m):
+    r_safe = float(R_safe_profile[i])
+    rho_d = r_safe / Rd_kpc
+
+    # Три радиальные фазы размотки Хопфа (4*pi^3 : pi^2 : pi) и оператор раскрытия Кожуры Theta(r)
+    f_vol = np.exp(-rho_d / (RHO_GRAY_END * R1_CORE))
+    f_twist = rho_d * np.exp(1.0 - rho_d)
+    f_loop = 1.0 - np.exp(-rho_d / np.pi)
+    Theta_loc = 0.5 * (1.0 + np.tanh(0.5 * (rho_d - RHO_GRAY_END) / K_PK_GATE))
+
+    # Сдвиг слоёв Оорта — Артина относительно объёмной доли конуса 60° (W_CONE_VOL = 0.25)
+    alpha_loc = dlnv_dlnr[i]
+    shear_deficit = max(W_CONE_VOL - alpha_loc, 0.0)
+    solid_excess = max(alpha_loc - (W_CONE_VOL + XI_ATOM), 0.0)
+
+    # Обтекание ядра галактики потоком Невода (эффект Бернулли) в зоне Кожуры
+    bernoulli_skin_flow = (
+        W_HOPF_VOL
+        * (1.0 - f_vol)
+        * Theta_loc
+        * (ETA_SKIN + K_PK_GATE * shear_deficit)
+    )
+    hopf_phase_weight = (
+        W_HOPF_VOL * f_vol
+        + W_HOPF_TWIST * f_twist
+        + W_HOPF_LOOP * f_loop
+        + bernoulli_skin_flow
+    )
+
+    # Вектор рассогласования в Золотом коридоре (A -> B -> C_GOLD)
+    arc_target_loc = ARC_B * (1.0 - f_gas_m[i]) + w_gas_m[i] * f_gas_m[i]
+    delta_arc_entangle = max(arc_target_loc - ARC_A, 0.0)
+    u_corridor = np.tanh(delta_arc_entangle / CORRIDOR_W)
+    gold_restoring_pull = (
+        GOLD_TENSION
+        * u_corridor
+        * (shear_deficit * f_loop - solid_excess * f_vol)
+    )
+
+    # Стоячая торсионная гармоника «валенка» ЧД в зоне тора Клиффорда
+    phi_torsion_bh = 2.0 * np.pi * RATIO_FT_F1 * rho_d
+    bh_torsion_wave = C_BRAID * np.cos(phi_torsion_bh) * f_twist
+
+    # Безразмерный гравитационный потенциал Эддингтона
+    phi_n_astro = (G_KPC * M_total) / (r_safe * (c_KMS**2))
+    gamma_r = 1.0 + ETA_SKIN * (1.0 - np.exp(-phi_n_astro / (TAU_CRIT**2)))
+
+    # Канонический линейный модификатор Бесселя (Уравнение 6.8 Приложения 13.1)
+    bessel_mod = (
+        1.0
+        + ETA_SKIN * chi_dynamic[i] * B_dynamic[i] * gamma_r * hopf_phase_weight
+        + C_BRAID
+        * f_twist
+        * (shear_deficit + BALANCE_50_50 * cone_face_on_boost)
+        + 0.5 * gold_restoring_pull
+    )
+
+    g_N_raw = (v_bar_sq_m[i] * (1000.0**2)) / (r_safe * KPC_M)
+    solid_ice_factor = max(alpha_loc, 0.0) * f_vol
+    g_N = g_N_raw + g_core_bh * solid_ice_factor
+
+    # ================= ЕДИНОЕ МОНОЛИТНОЕ УРАВНЕНИЕ СКОРОСТИ COSMO_OS.Absolute =================
+    u_norm = min(r_safe / r_outer, 1.0 - 1e-6)
+    visc_drag = (
+        f_twist * ((1.0 - u_norm) ** 2) * (1.0 - np.exp(-x_phase_local[i]))
+    )
+
+    arc_ceiling_gold = ARC_B * (1.0 - 0.5 * f_gas_m[i]) + I_TGS * (
+        0.5 * f_gas_m[i]
+    )
+    arc_stretch = ARC_A + (arc_ceiling_gold - ARC_A) * visc_drag
+    r_spiral = r_safe * (1.0 + Phi_vapor * (arc_stretch - 1.0))
+    ballast_drag = arc_stretch / ARC_A
+
+    D_CBD_over_R_Hubble = R1_CORE
+    face_on_torsion = (
+        ETA_SKIN
+        * max(np.cos(inc_rad_true) - np.sin(inc_rad_true), 0.0)
+        * shear_deficit
+    )
+    hopf_delta = (
+        W_HOPF_TWIST * f_twist * (ARC_B * shear_deficit - R1_CORE * solid_excess)
+        - DELTA_VAL * f_vol * solid_excess
+        - W_HOPF_LOOP * f_loop * (1.0 - cos_theta_cbd)
+        + bh_torsion_wave
+        + face_on_torsion
+        + gold_restoring_pull
+    )
+    hopf_sync = 1.0 + CORRIDOR_W * np.tanh(hopf_delta / CORRIDOR_W)
+
+    a_eff_crystal = (
+        a_sh0
+        * (1.0 + ETA_SKIN * D_CBD_over_R_Hubble * cos_theta_cbd)
+        * hopf_sync
+    )
+    a_eff_vapor = a_sh0 / (ballast_drag**ETA_SKIN)
+    a_eff_unified = Phi_crystal * a_eff_crystal + Phi_vapor * a_eff_vapor
+
+    y_arg = g_N / a_eff_unified + 1e-12
+    nu_raw = np.sqrt(0.5 * (1.0 + np.sqrt(1.0 + 4.0 / (y_arg**2))))
+
+    # Демпфирование твердотельного избытка с константой конфайнмента Самохваловой I_TGS (~1.43815)
+    solid_brake = (
+        I_TGS
+        * max(mean_solid_slope - K_PK_GATE, 0.0)
+        * (1.0 - R1_CORE * frac_gas)
+    )
+    vortex_turbulence = (
+        ETA_SKIN * solid_excess * (1.0 - XI_VOID * f_gas_m[i]) / (1.0 + s_outer)
+    )
+    shear_lock_vapor = K_PK_GATE + (1.0 - K_PK_GATE) * np.exp(
+        -(solid_brake + vortex_turbulence)
+    )
+    shear_lock_eff = 1.0 - Phi_vapor * (1.0 - shear_lock_vapor)
+    nu_unified = 1.0 + (nu_raw - 1.0) * shear_lock_eff
+
+    v_pred_raw = np.sqrt(nu_unified * v_bar_sq_m[i]) * bessel_mod
+    v_mod_unified = v_pred_raw + GAMMA_SCR * (v_pred_raw**2) / c_KMS
+
+    # Эпициклический шелест Птолемея с точными весами конуса 60° (W_TORUS_VOL = 3/4, W_CONE_VOL = 1/4)
+    s_eff_dwarf = min(s_baryon_eff, max(s_outer * DIM_SPACE, W_CONE_VOL))
+    udg_factor = 1.0 / (1.0 + s_eff_dwarf)
+
+    phi_ptolemy = (r_spiral * np.pi) / (Rd_kpc * SC_SETA)
+    ptolemy_vortex = np.abs(
+        np.cos(phi_ptolemy) + XI_ATOM * np.sin(phi_ptolemy)
+    )
+    lam_catch = (1.0 - (XI_ATOM + (XI_VOID - XI_ATOM) / (1.0 + y_arg))) * (
+        1.0 - np.exp(-r_spiral / (np.pi * Rd_kpc))
+    )
+    xi_link = XI_VOID - (XI_VOID - XI_ATOM) * np.exp(-Rd_kpc / r_safe)
+    bvp_grad_boost = 1.0 + Rd_kpc * np.abs(dchi_dynamic[i])
+
+    a_sh_eff = (
+        A_SH_BASE
+        * (1.0 + MIRROR + W_HOPF_TWIST + GOLD_TENSION * u_corridor)
+        * ballast_drag
+    )
+    V_shel_raw = (
+        (xi_link / XI_VOID)
+        * a_sh_eff
+        * bvp_grad_boost
+        * (W_TORUS_VOL + W_CONE_VOL * ptolemy_vortex)
+        * lam_catch
+        * ETA_KPD
+    )
+    pressure_boost = np.exp(r_safe / r_inf_dynamic)
+    V_shel = (
+        (V_shel_raw / (1.0 + np.log(1.0 + x_phase_local[i])))
+        * udg_factor
+        / aniso_gate
+    )
+
+    # Гладкая гиперболическая сшивка с барионным пределом резонансной защёлки Керра
+    v_floor = v_bar_m[i] * A_KERR_LATCH
+    v_net = v_mod_unified - Phi_vapor * (V_shel / pressure_boost) * (
+        1.0 - u_norm
+    )
+    v_pred_tgs[i] = 0.5 * (
+        v_net
+        + v_floor
+        + np.sqrt((v_net - v_floor) ** 2 + (XI_ATOM * v_floor) ** 2)
+    )
+    # ==========================================================================================
+
+  v_pred_tgs_obs = v_pred_tgs / inc_ratio
+
+  return {
+      "R": R_m,
+      "Vobs": V_o,
+      "v_tgs": v_pred_tgs_obs,
+      "v_bar": v_bar_m / inc_ratio,
+      "f_gas": frac_gas,
+      "s_ratio": s_ratio,
+      "rd": Rd_kpc,
+      "inc_true": inc_true_deg,
+      "delta_phi": delta_phi_total_deg,
+      "phi_vapor": Phi_vapor,
+  }
+
+
+# ============================ 5. ГЛАВНЫЙ ИСПОЛНЯЕМЫЙ КОНТУР ==================================
+def main(save_plots=SAVE_PLOTS):
+  sparc_dir = find_sparc_folder()
+  if not sparc_dir:
+    print("Папка SPARC не найдена.")
+    return 1
+
+  desktop_dir = get_desktop_path()
+  meta = load_metadata()
+  files = sorted(glob.glob(os.path.join(sparc_dir, "*_rotmod.dat")))
+  report_txt_path = os.path.join(
+      desktop_dir, "TGS_v4.8_COSMO_OS.Absolute_Report.txt"
+  )
+  plots_dir = os.path.join(desktop_dir, "TGS_v4.8_COSMO_OS.Absolute_Plots")
+
+  if save_plots:
+    os.makedirs(plots_dir, exist_ok=True)
+
+  all_tgs_err = []
+  all_tgs_diff = []
+  galaxy_summaries = []
+
+  print(
+      "Запуск ПМК «КВАНТОВЫЙ РУБЕЖ v4.8» COSMO_OS.Absolute (РЕЖИМ: ПОЛНАЯ"
+      f" ДЕДУКЦИЯ) на {len(files)} системах..."
+  )
+  print(
+      f"  [Паспорт Хопфа]: S_geo = {S_GEO:.7f} | S_vac = {S_VAC:.8f} | c ="
+      f" {c_KMS:.6f} км/с"
+  )
+  print(
+      f"  [Стереометрия 13.3 и 4.3]: R1 = {R1_CORE:.7f} | 2/R1 ="
+      f" {RHO_GRAY_END:.6f} | Затвор конуса 60° K_PK = {K_PK_GATE:.6f}"
+  )
+  print(
+      f"  [Золотой Коридор и P != NP]: A = {ARC_A:.6f} -> B = {ARC_B:.6f} ->"
+      f" C_gold = {ARC_C_GOLD:.6f} | I_TGS = {I_TGS:.6f} | Index_P/NP ="
+      f" {INDEX_P_NP:.5f}"
+  )
+
+  for idx, path in enumerate(files):
+    data = parse_sparc_file(path)
+    if not data:
+      continue
+    key = (
+        os.path.basename(path)
+        .replace("_rotmod.dat", "")
+        .replace(".dat", "")
+        .upper()
+    )
+    norm_key = normalize_name(key)
+
+    q_flag, inc, dist, rdisk_phot = meta.get(
+        key, meta.get(norm_key, (0, 45.0, 10.0, 0.0))
+    )
+
+    # Вызов дедуктивного ядра (без передачи экспертного флага качества q_flag)
+    res = compute_galaxy_absolute(data, inc, dist, rdisk_phot)
+    if not res or len(res["R"]) < 3:
+      continue
+
+    tgs_pe = 100.0 * (
+        2.0
+        * np.abs(res["v_tgs"] - res["Vobs"])
+        / (res["v_tgs"] + res["Vobs"])
+    )
+    all_tgs_err.extend(tgs_pe)
+    all_tgs_diff.extend(res["v_tgs"] - res["Vobs"])
+
+    galaxy_smape = float(np.median(tgs_pe))
+    galaxy_bias = float(np.mean(res["v_tgs"] - res["Vobs"]))
+
+    galaxy_summaries.append({
+        "name": key,
+        "q": q_flag,
+        "points": len(tgs_pe),
+        "smape": galaxy_smape,
+        "bias": galaxy_bias,
+        "f_gas": res["f_gas"],
+        "s_glob": res["s_ratio"],
+        "rd": res["rd"],
+        "dist": dist,
+        "inc_obs": inc,
+        "inc_true": res["inc_true"],
+        "delta_phi": res["delta_phi"],
+        "phi_vapor": res["phi_vapor"],
+    })
+
+    if save_plots:
+      try:
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=120)
+        ax.plot(
+            res["R"], res["Vobs"], "ko", markersize=4.5, label="V_obs (SPARC)"
+        )
+        ax.plot(
+            res["R"],
+            res["v_tgs"],
+            "r-",
+            linewidth=1.8,
+            label=f"COSMO_OS.Absolute (sMAPE={galaxy_smape:.1f}%)",
+        )
+        ax.plot(
+            res["R"],
+            res["v_bar"],
+            "b--",
+            linewidth=1.2,
+            alpha=0.7,
+            label="V_baryon",
+        )
+
+        ax.set_title(
+            f"{key} | Q={q_flag} | Inc_obs={inc:.1f}°"
+            f" (True={res['inc_true']:.1f}°) | D={dist:.1f} Mpc",
+            fontsize=11,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Радиус R [кпк]", fontsize=9)
+        ax.set_ylabel("Круговая скорость V [км/с]", fontsize=9)
+        ax.grid(True, linestyle=":", alpha=0.5)
+        ax.legend(loc="lower right", fontsize=8)
+        fig.tight_layout()
+
+        plot_file = os.path.join(plots_dir, f"{key}_rotcurve.png")
+        fig.savefig(plot_file)
+        plt.close(fig)
+      except Exception:
+        plt.close("all")
+
+    if (idx + 1) % 25 == 0 or (idx + 1) == len(files):
+      print(f"  ... обработано {idx + 1}/{len(files)} систем")
+
+  if not galaxy_summaries:
+    print("Не удалось рассчитать ни одну систему.")
+    return 1
+
+  overall_median_smape = float(np.median([g["smape"] for g in galaxy_summaries]))
+  overall_mean_smape = float(np.mean([g["smape"] for g in galaxy_summaries]))
+  pointwise_median = float(np.median(all_tgs_err))
+  pointwise_mean = float(np.mean(all_tgs_err))
+
+  galaxy_summaries.sort(key=lambda x: x["smape"], reverse=True)
+
+  with open(report_txt_path, "w", encoding="utf-8") as f:
+
+    def W(*args):
+      f.write(" ".join(str(x) for x in args) + "\n")
+
+    LN = 110
+    W("=" * LN)
+    W(
+        " ПРОГРАММНО-МАТЕМАТИЧЕСКИЙ КОМПЛЕКС «КВАНТОВЫЙ РУБЕЖ v4.8»"
+        " COSMO_OS.Absolute"
+    )
+    W(f" ОБРАБОТКА СИСТЕМ: {len(galaxy_summaries)} | РЕЖИМ: ПОЛНАЯ ДЕДУКЦИЯ")
+    W(' Разработчик: Самохвалов В.В. & Аналитический центр "Брейншторм", 2026 г.')
+    W(
+        " ВХОД: папка SPARC на Рабочем столе (содержит файлы *_rotmod.dat) и"
+        " Table1.mrt"
+    )
+    W(" ВЫХОД: TGS_v4.8_COSMO_OS.Absolute_Report.txt на Рабочем столе")
+    W(
+        "        папка TGS_v4.8_COSMO_OS.Absolute_Plots на Рабочем столе (175"
+        " графиков)"
+    )
+    W("=" * LN)
+    W("")
+    W(" ДЕДУКТИВНЫЙ ПАСПОРТ МИРОВЫХ ИНВАРИАНТОВ (ИЗ ПЕРВЫХ ПРИНЦИПОВ 50/50):")
+    W(
+        f"   Радиус архивного Ядра R1 = 0.5^(1/3)           ="
+        f" {R1_CORE:.9f} (КПД Кожуры eta = {ETA_SKIN:.9f})"
+    )
+    W(
+        f"   Пористости фаз (xi_space / xi_atom / xi_void)  ="
+        f" {XI_SPACE:.7f} / {XI_ATOM:.7f} / {XI_VOID:.7f}"
+    )
+    W(
+        f"   Предел текучести полимера tau_crit = xi/(2*pi) ="
+        f" {TAU_CRIT:.8f} (Порог КВ mu_0^2 = {mu_0_sq:.6f})"
+    )
+    W(
+        f"   Доля зоны Mass Gap Серой сферы (5/16)          ="
+        f" {W_MASS_GAP:.6f} (Тор : Конус 60° = {W_TORUS_VOL:.2f} :"
+        f" {W_CONE_VOL:.2f})"
+    )
+    W(f"   Импеданс расслоения Хопфа S_geo = 4π³ + π² + π = {S_GEO:.7f}")
+    W(f"   Вакуумный скаляр с решёткой Лича S_vac         = {S_VAC:.8f}")
+    W(
+        "   Синхронная скорость вращения сферы Нейтрино c  ="
+        f" {c_KMS:.6f} км/с"
+    )
+    W(
+        f"   Толщина «валенка» ЧД (dr / r_s = eta / 3√2)    ="
+        f" {DELTA_VAL:.6f} (Коса Артина C_braid = {C_BRAID:.7f})"
+    )
+    W(f"   Резонансная защёлка супервытекания Керра a*_res= {A_KERR_LATCH:.6f}")
+    W(f"   Рубеж Серой сферы (2 / R1 = 2^(4/3))           = {RHO_GRAY_END:.6f}")
+    W(f"   Фактор Пиолы — Кирхгофа конуса 60° (K_PK)      = {K_PK_GATE:.6f}")
+    W(f"   Веха А (Дуга спирали Архимеда при 1 рад)       = {ARC_A:.8f}*R")
+    W(f"   Веха B (Сферический каркас 50/50: 1/R1 = ∛2)   = {ARC_B:.8f}*R")
+    W(
+        "   Веха C_gold (Горизонт 100% Золотого сечения)   ="
+        f" {ARC_C_GOLD:.8f}*R"
+    )
+    W(
+        f"   Дедуктивный предел конфайнмента I_TGS (P != NP)="
+        f" {I_TGS:.8f}*R (Индекс P/NP = {INDEX_P_NP:.5f})"
+    )
+    W(
+        "   Космический люфт пористости Delta_C (4/3*tau_c)="
+        f" {DELTA_GOLD:.8f} (натяжение {100.0 * GOLD_TENSION:.3f}%)"
+    )
+    W(
+        f"   Макро-период космологического домена L_domain  ="
+        f" {L_DOMAIN_MPC:.4f} Мпк (Делитель K_Rd = {K_RD_SCALE:.5f})"
+    )
+    W("")
+    W(
+        f" Общая медиана sMAPE (Мэйп): {overall_median_smape:.2f}% |"
+        f" {pointwise_median:.2f}% (ансамблевый поточечный анализ)"
+    )
+    W(
+        f" Среднее значение sMAPE    : {overall_mean_smape:.2f}% |"
+        f" {pointwise_mean:.2f}% (дискретная поточечная верификация)"
+    )
+    W(f" Медианный сдвиг (Bias)    : {np.median(all_tgs_diff):+.2f} км/с")
+    W("")
+    W(" РАСПРЕДЕЛЕНИЕ ТОЧНОСТИ НЕВОДА:")
+    for thr in (5, 10, 15, 25, 50):
+      n_ok = sum(1 for g in galaxy_summaries if g["smape"] <= thr)
+      W(
+          f"   до {thr:2d}% : {n_ok:3d} из {len(galaxy_summaries)} "
+          f" ({100.0 * n_ok / len(galaxy_summaries):5.1f}%)"
+      )
+    W("")
+    W(" АНАЛИЗ ЗАВИСИМОСТИ ТОЧНОСТИ ОТ КАЧЕСТВА ДАННЫХ Q (Флаг Table1):")
+    W("-" * LN)
+    W("   Категория Q   |   Количество   |   Медиана sMAPE   |   Средний Bias")
+    W("-" * LN)
+    for q_val in (1, 2, 3):
+      q_list = [g for g in galaxy_summaries if g["q"] == q_val]
+      if q_list:
+        q_smapes = [g["smape"] for g in q_list]
+        q_biases = [g["bias"] for g in q_list]
+        W(
+            f"       Q={q_val}       |       {len(q_list):3d}      |       "
+            f" {np.median(q_smapes):5.2f}%      |      "
+            f" {np.mean(q_biases):+6.2f} км/с"
+        )
+    W("-" * LN)
+    W("")
+    W(
+        " ТОП-10 ХУДШИХ СИСТЕМ ВЫВЕРНУТОГО ПОГРАНИЧНОГО СЛОЯ"
+        " (COSMO_OS.Absolute):"
+    )
+    for rank, g in enumerate(galaxy_summaries[:10], 1):
+      W(
+          f"   [{rank:2d}] {g['name']:<12s} sMAPE={g['smape']:6.2f}% |"
+          f" bias={g['bias']:+6.1f} км/с | Q={g['q']} |"
+          f" Inc={g['inc_obs']:5.1f}° -> {g['inc_true']:5.1f}° |"
+          f" Phi_vap={g['phi_vapor']:.2f} | D={g['dist']:5.1f} Мпк"
+      )
+    W("")
+    W("=" * LN)
+    W(
+        " ПОГАЛАКТИЧНАЯ ТАБЛИЦА РЕНОРМАЛИЗАЦИОННОЙ СБОРКИ СКОРОСТЕЙ"
+        " (v4.8 COSMO_OS.Absolute)"
+    )
+    W(
+        " Галактика      |   sMAPE  |      Bias     |  Inc_obs -> Inc_true |"
+        " Phi_vap |  f_gas |   s_glob |     Rd   |  Q"
+    )
+    W("-" * LN)
+    galaxy_summaries.sort(key=lambda x: x["name"])
+    for g in galaxy_summaries:
+      W(
+          f"{g['name']:<14s} |   {g['smape']:5.2f}  |     {g['bias']:+8.2f}  |"
+          f"   {g['inc_obs']:5.1f}° -> {g['inc_true']:5.1f}°  |  "
+          f" {g['phi_vapor']:4.2f}  |  {g['f_gas']:4.2f}  |   {g['s_glob']:6.2f}"
+          f" |   {g['rd']:5.2f}  |  {g['q']}"
+      )
+    W("=" * LN)
+
+  print(
+      f"\n[ГОТОВО]: Общая медиана sMAPE: {overall_median_smape:.2f}% |"
+      f" Поточечная медиана: {pointwise_median:.2f}%"
+  )
+  print(f"[ГОТОВО]: Отчет выгружен: {report_txt_path}")
+  if save_plots:
+    print(f"[ГОТОВО]: Графики сохранены в папку: {plots_dir}")
+  return 0
+
+
+if __name__ == "__main__":
+  sys.exit(main())
